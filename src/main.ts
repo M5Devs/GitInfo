@@ -192,9 +192,7 @@ function handleRouteChanged(route: RouteState): void {
     compareView.classList.remove('hidden');
     compareView.classList.add('flex');
 
-    if (!compareView.innerHTML.trim()) {
-      compareView.innerHTML = renderCompareHTML();
-    }
+    compareView.innerHTML = renderCompareHTML();
     setupCompareEvents();
 
     const paramA = route.queryParams.get('a');
@@ -202,19 +200,20 @@ function handleRouteChanged(route: RouteState): void {
     const inputA = document.getElementById('repo-a-input') as HTMLInputElement;
     const inputB = document.getElementById('repo-b-input') as HTMLInputElement;
 
-    if (paramA) inputA.value = paramA;
-    if (paramB) inputB.value = paramB;
+    if (paramA && inputA) inputA.value = paramA;
+    if (paramB && inputB) inputB.value = paramB;
 
-    if (paramA || paramB) {
-      executeComparison(inputA.value, inputB.value);
+    const valA = inputA ? inputA.value.trim() : 'facebook/react';
+    const valB = inputB ? inputB.value.trim() : 'vuejs/core';
+
+    if (valA && valB) {
+      executeComparison(valA, valB);
     }
   } else if (route.path === '/explore') {
     exploreView.classList.remove('hidden');
     exploreView.classList.add('flex');
 
-    if (!exploreView.innerHTML.trim()) {
-      exploreView.innerHTML = renderExploreHTML();
-    }
+    exploreView.innerHTML = renderExploreHTML();
     initExploreEvents(exploreView);
   } else {
     // Default Route: / (Inspect View)

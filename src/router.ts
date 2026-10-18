@@ -73,10 +73,15 @@ export function initRouter(onRouteChanged?: RouteChangeCallback): void {
   }
 
   document.addEventListener('click', (e) => {
-    const target = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[data-nav-link], a[data-link]');
+    const target = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[data-nav-link], a[data-link], a[href]');
     if (target) {
       const href = target.getAttribute('href');
-      if (href && (href.startsWith('/') || href.startsWith(window.location.origin))) {
+      if (
+        href &&
+        (href.startsWith('/') || href.startsWith(window.location.origin)) &&
+        target.getAttribute('target') !== '_blank' &&
+        !target.hasAttribute('download')
+      ) {
         e.preventDefault();
         navigateTo(href);
       }
