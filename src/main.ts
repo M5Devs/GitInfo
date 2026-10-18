@@ -1,6 +1,6 @@
 import './style.css';
 import { parseGitHubRepo } from './utils/parser';
-import { formatRepoSize, formatNumber, formatRelativeTime } from './utils/formatters';
+import { formatRepoSize, estimateZipSnapshot, formatNumber, formatRelativeTime } from './utils/formatters';
 import { calculateLanguageBreakdown } from './utils/languages';
 import {
   fetchRepoDetails,
@@ -32,6 +32,7 @@ import { calculateFuelGauge } from './utils/rateLimit';
 import { initRouter, navigateTo, RouteState } from './router';
 import { renderCompareHTML, executeComparison } from './compare';
 import { renderExploreHTML, initExploreEvents } from './explore';
+import { renderAppsHTML, initAppsEvents } from './apps';
 
 // DOM Element References
 const searchForm = document.getElementById('search-form') as HTMLFormElement;
@@ -80,6 +81,7 @@ const dropdownLogoutBtn = document.getElementById('dropdown-logout-btn') as HTML
 const inspectView = document.getElementById('inspect-view') as HTMLElement;
 const compareView = document.getElementById('compare-view') as HTMLElement;
 const exploreView = document.getElementById('explore-view') as HTMLElement;
+const appsView = document.getElementById('apps-view') as HTMLElement;
 
 // Dashboard & State Displays (Inspect View)
 const loadingSkeleton = document.getElementById('loading-skeleton') as HTMLElement;
@@ -126,6 +128,26 @@ const languagesTotalCount = document.getElementById('languages-total-count') as 
 const languagesBar = document.getElementById('languages-bar') as HTMLElement;
 const languagesLegend = document.getElementById('languages-legend') as HTMLElement;
 
+
+// Announcement Banner Elements
+const announcementBanner = document.getElementById("announcement-banner") as HTMLElement;
+const dismissAnnouncementBtn = document.getElementById("dismiss-announcement-btn") as HTMLButtonElement;
+
+function setupAnnouncementBanner(): void {
+  if (!announcementBanner) return;
+  const isDismissed = localStorage.getItem("gitinfo_announcement_dismissed");
+  if (isDismissed !== "true") {
+    announcementBanner.classList.remove("hidden");
+    announcementBanner.classList.add("flex");
+  }
+
+  dismissAnnouncementBtn?.addEventListener("click", () => {
+    localStorage.setItem("gitinfo_announcement_dismissed", "true");
+    announcementBanner.classList.add("hidden");
+    announcementBanner.classList.remove("flex");
+  });
+}
+
 let currentBillingCycle: 'monthly' | 'annually' = 'monthly';
 
 // Helper function to show elegant toast messages
@@ -152,6 +174,7 @@ export function showToast(message: string): void {
 // Initial state setup
 async function init(): Promise<void> {
   setupEventListeners();
+  setupAnnouncementBanner();
 
   updatePatUI();
   updateUserHeaderUI();
@@ -215,6 +238,13 @@ function handleRouteChanged(route: RouteState): void {
 
     exploreView.innerHTML = renderExploreHTML();
     initExploreEvents(exploreView);
+    } else if (route.path === "/apps") {
+    if (appsView) {
+      appsView.classList.remove("hidden");
+      appsView.classList.add("flex");
+      appsView.innerHTML = renderAppsHTML();
+      initAppsEvents(appsView, showToast);
+    }
   } else {
     // Default Route: / (Inspect View)
     inspectView.classList.remove('hidden');
@@ -906,6 +936,41 @@ function renderDashboard(repo: any, rawLanguages: Record<string, number>): void 
   metaLicense.textContent = repo.license?.spdx_id || repo.license?.name || 'No License';
   metaBranch.textContent = repo.default_branch || 'main';
   metaPushed.textContent = formatRelativeTime(repo.pushed_at);
+
+
+  // Render ZIP Snapshot direct download and estimate
+  const zipSnapshot = estimateZipSnapshot(repo.size);
+  const zipSizeDisplay = document.getElementById("zip-size-display");
+  const zipSavingsBadge = document.getElementById("zip-savings-badge");
+  const zipComparisonText = document.getElementById("zip-comparison-text");
+  const downloadZipBtn = document.getElementById("download-zip-btn") as HTMLAnchorElement;
+
+  if (zipSizeDisplay) zipSizeDisplay.textContent = zipSnapshot.formattedZipSize;
+  if (zipSavingsBadge) zipSavingsBadge.textContent = `${zipSnapshot.savingsPercentage}% lighter — no Git history`;
+  if (zipComparisonText) zipComparisonText.textContent = zipSnapshot.comparisonText;
+
+  const defaultBranch = repo.default_branch || "main";
+  const zipUrl = `https://github.com/${repo.owner.login}/${repo.name}/archive/refs/heads/${defaultBranch}.zip`;
+  if (downloadZipBtn) {
+    downloadZipBtn.href = zipUrl;
+  }
+
+  const codeloadUrl = `https://codeload.github.com/${repo.owner.login}/${repo.name}/zip/refs/heads/${defaultBranch}`;
+  fetch(codeloadUrl, { method: "HEAD" })
+    .then((res) => {
+      const len = res.headers.get("content-length");
+      if (len) {
+        const bytes = parseInt(len, 10);
+        if (!isNaN(bytes) && bytes > 0) {
+          const zipKB = bytes / 1024;
+          const formatted = formatRepoSize(zipKB);
+          if (zipSizeDisplay) zipSizeDisplay.textContent = formatted.formattedString;
+          const savings = Math.min(99, Math.max(0, Math.round((1 - zipKB / repo.size) * 100)));
+          if (zipSavingsBadge) zipSavingsBadge.textContent = `${savings}% lighter — no Git history`;
+        }
+      }
+    })
+    .catch(() => {});
 
   renderLanguages(rawLanguages);
 

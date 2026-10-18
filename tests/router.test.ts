@@ -15,6 +15,7 @@ describe("SPA Router Module", () => {
         <a href="/" data-nav-link="/">Inspect</a>
         <a href="/compare" data-nav-link="/compare">Compare</a>
         <a href="/explore" data-nav-link="/explore">Explore</a>
+        <a href="/apps" data-nav-link="/apps">Apps</a>
         <a href="/compare" id="plain-link">Plain Compare Link</a>
         <a href="https://external.com" id="external-link" target="_blank">External</a>
       </nav>
@@ -22,6 +23,7 @@ describe("SPA Router Module", () => {
         <div id="inspect-view" class="view-container flex"></div>
         <div id="compare-view" class="view-container hidden"></div>
         <div id="explore-view" class="view-container hidden"></div>
+        <div id="apps-view" class="view-container hidden"></div>
       </main>
     `;
     window.history.replaceState({}, "", "/");
@@ -33,6 +35,8 @@ describe("SPA Router Module", () => {
     expect(normalizePath("/compare/")).toBe("/compare");
     expect(normalizePath("/explore")).toBe("/explore");
     expect(normalizePath("/explore/")).toBe("/explore");
+    expect(normalizePath("/apps")).toBe("/apps");
+    expect(normalizePath("/apps/")).toBe("/apps");
     expect(normalizePath("/unknown")).toBe("/");
   });
 

@@ -131,3 +131,34 @@ export function formatRelativeTime(isoDateString: string): string {
   const diffInYears = Math.floor(diffInDays / 365);
   return `${diffInYears} ${diffInYears === 1 ? 'year' : 'years'} ago`;
 }
+
+
+export interface ZipSnapshotEstimate {
+  estimatedZipKB: number;
+  formattedZipSize: string;
+  savingsPercentage: number;
+  comparisonText: string;
+}
+
+export function estimateZipSnapshot(sizeInKB: number): ZipSnapshotEstimate {
+  if (isNaN(sizeInKB) || sizeInKB <= 0) {
+    return {
+      estimatedZipKB: 0,
+      formattedZipSize: "~0 KB",
+      savingsPercentage: 0,
+      comparisonText: "0% lighter — no Git history included",
+    };
+  }
+
+  const estimatedZipKB = Math.max(1, Math.round(sizeInKB * 0.18));
+  const formattedZip = formatRepoSize(estimatedZipKB);
+  const formattedFull = formatRepoSize(sizeInKB);
+  const savingsPercentage = Math.min(99, Math.max(50, Math.round((1 - estimatedZipKB / sizeInKB) * 100)));
+
+  return {
+    estimatedZipKB,
+    formattedZipSize: `~${formattedZip.formattedString}`,
+    savingsPercentage,
+    comparisonText: `vs ${formattedFull.formattedString} Full Clone — no Git history included`,
+  };
+}

@@ -1,4 +1,4 @@
-export type RoutePath = '/' | '/compare' | '/explore';
+export type RoutePath = '/' | '/compare' | '/explore' | '/apps';
 
 export interface RouteState {
   path: string;
@@ -15,6 +15,7 @@ export function normalizePath(pathname: string): string {
   }
   if (pathname === '/compare') return '/compare';
   if (pathname === '/explore') return '/explore';
+  if (pathname === '/apps') return '/apps';
   return '/';
 }
 
