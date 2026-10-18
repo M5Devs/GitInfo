@@ -1,3 +1,7 @@
+import { getActiveToken, getStoredPat, setStoredPat, PAT_STORAGE_KEY } from '../utils/auth';
+
+export { getStoredPat, setStoredPat, PAT_STORAGE_KEY };
+
 export interface GitHubRepoData {
   id: number;
   name: string;
@@ -36,6 +40,13 @@ export interface RepoDetails {
   languages: GitHubLanguagesData;
 }
 
+export interface RateLimitStatus {
+  limit: number;
+  remaining: number;
+  resetUnix: number;
+  used: number;
+}
+
 export class GitHubApiError extends Error {
   status: number;
   isRateLimit: boolean;
@@ -50,30 +61,35 @@ export class GitHubApiError extends Error {
   }
 }
 
-export const PAT_STORAGE_KEY = 'gitinfo_github_pat';
+export async function fetchRateLimit(customToken?: string): Promise<RateLimitStatus> {
+  const token = customToken !== undefined ? customToken : getActiveToken();
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github.v3+json',
+  };
 
-export function getStoredPat(): string | null {
-  try {
-    return localStorage.getItem(PAT_STORAGE_KEY);
-  } catch {
-    return null;
+  if (token) {
+    headers.Authorization = `Bearer ${token.trim()}`;
   }
-}
 
-export function setStoredPat(token: string): void {
-  try {
-    if (token.trim()) {
-      localStorage.setItem(PAT_STORAGE_KEY, token.trim());
-    } else {
-      localStorage.removeItem(PAT_STORAGE_KEY);
-    }
-  } catch {
-    // Ignore localStorage errors
+  const res = await fetch('https://api.github.com/rate_limit', { headers });
+
+  if (!res.ok) {
+    throw new GitHubApiError(`Failed to fetch rate limit (${res.status})`, res.status);
   }
+
+  const data = await res.json();
+  const core = data.resources?.core || { limit: token ? 5000 : 60, remaining: token ? 5000 : 60, reset: Math.floor(Date.now() / 1000) + 3600, used: 0 };
+
+  return {
+    limit: core.limit,
+    remaining: core.remaining,
+    resetUnix: core.reset,
+    used: core.used || (core.limit - core.remaining),
+  };
 }
 
 export async function fetchRepoDetails(owner: string, repo: string, customPat?: string): Promise<RepoDetails> {
-  const pat = customPat !== undefined ? customPat : getStoredPat();
+  const pat = customPat !== undefined ? customPat : getActiveToken();
 
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github.v3+json',
@@ -101,12 +117,12 @@ export async function fetchRepoDetails(owner: string, repo: string, customPat?: 
         const rateLimitRemaining = repoRes.headers.get('x-ratelimit-remaining');
         if (rateLimitRemaining === '0') {
           throw new GitHubApiError(
-            'GitHub API rate limit exceeded. Please add a Personal Access Token (PAT) to continue.',
+            'GitHub API rate limit exceeded. Please add a Personal Access Token (PAT) or sign in with GitHub to continue.',
             403
           );
         } else {
           throw new GitHubApiError(
-            'Access forbidden. If this repository is private, a valid PAT is required.',
+            'Access forbidden. If this repository is private, a valid token is required.',
             403
           );
         }
