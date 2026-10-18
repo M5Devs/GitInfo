@@ -1,8 +1,10 @@
+export type WeightCategory = 'feather' | 'light' | 'medium' | 'heavy' | 'titan' | 'blackHole';
+
 export interface FormattedSize {
   value: number;
   unit: 'KB' | 'MB' | 'GB';
   formattedString: string;
-  weightCategory: 'light' | 'medium' | 'heavy' | 'massive';
+  weightCategory: WeightCategory;
   gaugePercentage: number;
 }
 
@@ -12,7 +14,7 @@ export function formatRepoSize(sizeInKB: number): FormattedSize {
       value: 0,
       unit: 'KB',
       formattedString: '0 KB',
-      weightCategory: 'light',
+      weightCategory: 'feather',
       gaugePercentage: 0,
     };
   }
@@ -38,23 +40,37 @@ export function formatRepoSize(sizeInKB: number): FormattedSize {
     formattedString = `${value.toFixed(2)} GB`;
   }
 
-  let weightCategory: 'light' | 'medium' | 'heavy' | 'massive';
-  let gaugePercentage: number;
+  let weightCategory: WeightCategory;
+
+  // Tier Thresholds in KB:
+  // 1. Feather: < 1 MB (1024 KB)
+  // 2. Light: 1 MB - 20 MB (1024 KB - 20480 KB)
+  // 3. Medium: 20 MB - 100 MB (20480 KB - 102400 KB)
+  // 4. Heavy: 100 MB - 1 GB (102400 KB - 1048576 KB)
+  // 5. Titan: 1 GB - 10 GB (1048576 KB - 10485760 KB)
+  // 6. Black Hole: > 10 GB (>= 10485760 KB)
 
   if (sizeInKB < 1024) {
+    weightCategory = 'feather';
+  } else if (sizeInKB < 20480) {
     weightCategory = 'light';
-  } else if (sizeInKB < 51200) {
+  } else if (sizeInKB < 102400) {
     weightCategory = 'medium';
-  } else if (sizeInKB < 524288) {
+  } else if (sizeInKB < 1048576) {
     weightCategory = 'heavy';
+  } else if (sizeInKB < 10485760) {
+    weightCategory = 'titan';
   } else {
-    weightCategory = 'massive';
+    weightCategory = 'blackHole';
   }
+
+  let gaugePercentage: number;
 
   if (sizeInKB <= 0) {
     gaugePercentage = 0;
   } else {
-    const maxLog = Math.log10(10485760);
+    // Max scale up to 64 GB (67,108,864 KB) for Black Hole scale
+    const maxLog = Math.log10(67108864);
     const currentLog = Math.log10(Math.max(1, sizeInKB));
     gaugePercentage = Math.min(100, Math.max(5, Math.round((currentLog / maxLog) * 100)));
   }
