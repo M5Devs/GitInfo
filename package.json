@@ -3,6 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "bin": {
+    "gitinfo": "./cli/bin.js"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

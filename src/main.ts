@@ -29,6 +29,9 @@ import {
 } from './utils/auth';
 import { getPricingTiers } from './utils/pricing';
 import { calculateFuelGauge } from './utils/rateLimit';
+import { initRouter, navigateTo, RouteState } from './router';
+import { renderCompareHTML, executeComparison } from './compare';
+import { renderExploreHTML, initExploreEvents } from './explore';
 
 // DOM Element References
 const searchForm = document.getElementById('search-form') as HTMLFormElement;
@@ -73,7 +76,12 @@ const dropdownChangeTokenBtn = document.getElementById('dropdown-change-token-bt
 const dropdownSigninGithubBtn = document.getElementById('dropdown-signin-github-btn') as HTMLButtonElement;
 const dropdownLogoutBtn = document.getElementById('dropdown-logout-btn') as HTMLButtonElement;
 
-// Dashboard & State Displays
+// View Containers
+const inspectView = document.getElementById('inspect-view') as HTMLElement;
+const compareView = document.getElementById('compare-view') as HTMLElement;
+const exploreView = document.getElementById('explore-view') as HTMLElement;
+
+// Dashboard & State Displays (Inspect View)
 const loadingSkeleton = document.getElementById('loading-skeleton') as HTMLElement;
 const errorCard = document.getElementById('error-card') as HTMLElement;
 const errorTitle = document.getElementById('error-title') as HTMLElement;
@@ -129,7 +137,6 @@ export function showToast(message: string): void {
   toast.innerHTML = `<span>${message}</span>`;
   toastContainer.appendChild(toast);
 
-  // Trigger animation
   requestAnimationFrame(() => {
     toast.classList.remove('translate-y-2', 'opacity-0');
   });
@@ -146,15 +153,12 @@ export function showToast(message: string): void {
 async function init(): Promise<void> {
   setupEventListeners();
 
-  // Restore session state immediately from localStorage on boot
   updatePatUI();
   updateUserHeaderUI();
 
-  // Handle OAuth callback if returning with ?code=...
   try {
     const authResult = await handleOAuthCallback();
     if (authResult) {
-      // Successfully authenticated via OAuth -> automatically run verification checks
       await runVerificationChecks();
       updateUserHeaderUI();
       refreshRateLimitData();
@@ -170,7 +174,78 @@ async function init(): Promise<void> {
   updatePatUI();
   updateUserHeaderUI();
   refreshRateLimitData();
-  handleUrlQueryParams();
+
+  // Initialize Router
+  initRouter(handleRouteChanged);
+}
+
+function handleRouteChanged(route: RouteState): void {
+  // Hide all view containers
+  inspectView.classList.add('hidden');
+  inspectView.classList.remove('flex');
+  compareView.classList.add('hidden');
+  compareView.classList.remove('flex');
+  exploreView.classList.add('hidden');
+  exploreView.classList.remove('flex');
+
+  if (route.path === '/compare') {
+    compareView.classList.remove('hidden');
+    compareView.classList.add('flex');
+
+    if (!compareView.innerHTML.trim()) {
+      compareView.innerHTML = renderCompareHTML();
+    }
+    setupCompareEvents();
+
+    const paramA = route.queryParams.get('a');
+    const paramB = route.queryParams.get('b');
+    const inputA = document.getElementById('repo-a-input') as HTMLInputElement;
+    const inputB = document.getElementById('repo-b-input') as HTMLInputElement;
+
+    if (paramA) inputA.value = paramA;
+    if (paramB) inputB.value = paramB;
+
+    if (paramA || paramB) {
+      executeComparison(inputA.value, inputB.value);
+    }
+  } else if (route.path === '/explore') {
+    exploreView.classList.remove('hidden');
+    exploreView.classList.add('flex');
+
+    if (!exploreView.innerHTML.trim()) {
+      exploreView.innerHTML = renderExploreHTML();
+    }
+    initExploreEvents(exploreView);
+  } else {
+    // Default Route: / (Inspect View)
+    inspectView.classList.remove('hidden');
+    inspectView.classList.add('flex');
+
+    const repoParam = route.queryParams.get('repo');
+    if (repoParam) {
+      repoInput.value = repoParam;
+      const parsed = parseGitHubRepo(repoParam);
+      if (parsed) {
+        inspectRepo(parsed.owner, parsed.repo);
+      }
+    }
+  }
+}
+
+function setupCompareEvents(): void {
+  const compareForm = document.getElementById('compare-form') as HTMLFormElement;
+  if (compareForm && !compareForm.hasAttribute('data-bound')) {
+    compareForm.setAttribute('data-bound', 'true');
+    compareForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const inputA = (document.getElementById('repo-a-input') as HTMLInputElement).value.trim();
+      const inputB = (document.getElementById('repo-b-input') as HTMLInputElement).value.trim();
+
+      if (inputA && inputB) {
+        navigateTo(`/compare?a=${encodeURIComponent(inputA)}&b=${encodeURIComponent(inputB)}`);
+      }
+    });
+  }
 }
 
 async function runVerificationChecks(): Promise<{ isGigachad: boolean; isPatron: boolean }> {
@@ -187,7 +262,6 @@ async function runVerificationChecks(): Promise<{ isGigachad: boolean; isPatron:
     return { isGigachad: false, isPatron: false };
   }
 
-  // Check Gigachad (Star verification for M5Devs/GitInfo)
   let isGigachad = getStoredGigachadVerified();
   const starResult = await checkUserStarredRepo('M5Devs', 'GitInfo', token);
   if (starResult !== null) {
@@ -195,7 +269,6 @@ async function runVerificationChecks(): Promise<{ isGigachad: boolean; isPatron:
     setStoredGigachadVerified(isGigachad);
   }
 
-  // Check Patron (VIP List OR GraphQL isSponsoring check for M5Devs)
   let isPatron = isVipSponsor(username);
   if (!isPatron) {
     const sponsorResult = await checkUserSponsoringAccount('M5Devs', token);
@@ -209,7 +282,6 @@ async function runVerificationChecks(): Promise<{ isGigachad: boolean; isPatron:
     setStoredPatronVerified(true);
   }
 
-  // Reset active plan if lost verification
   const currentPlan = getStoredPlan();
   if (currentPlan === 'gigachad' && !isGigachad) {
     setStoredPlan('pro');
@@ -247,7 +319,6 @@ function updateUserHeaderUI(): void {
   userBadgeContainer.innerHTML = '';
 
   if (profile && oauthToken) {
-    // Signed in via GitHub OAuth
     const avatar = document.createElement('img');
     avatar.src = profile.avatar_url;
     avatar.alt = profile.login;
@@ -280,7 +351,6 @@ function updateUserHeaderUI(): void {
     dropdownLogoutBtn.classList.add('flex');
     dropdownSigninGithubBtn.parentElement?.classList.add('hidden');
   } else if (patToken) {
-    // Authenticated via PAT
     const icon = document.createElement('span');
     icon.textContent = '🔑';
 
@@ -307,7 +377,6 @@ function updateUserHeaderUI(): void {
     dropdownLogoutBtn.classList.add('flex');
     dropdownSigninGithubBtn.parentElement?.classList.remove('hidden');
   } else {
-    // Guest Mode
     const icon = document.createElement('span');
     icon.textContent = '⚡';
 
@@ -328,7 +397,6 @@ function updateUserHeaderUI(): void {
     dropdownSigninGithubBtn.parentElement?.classList.remove('hidden');
   }
 
-  // Update dropdown plan badge
   if (plan === 'patron') {
     dropdownPlanBadge.textContent = 'Patron 💖';
     dropdownPlanBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-pink-500/20 text-pink-300 border border-pink-500/30';
@@ -343,7 +411,6 @@ function updateUserHeaderUI(): void {
     dropdownPlanBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-800 text-slate-400 border border-slate-700';
   }
 
-  // Update dropdown verification statuses
   if (dropdownGigachadStatus) {
     if (isGigachadVerified) {
       dropdownGigachadStatus.textContent = '✅ Verified';
@@ -488,7 +555,6 @@ function renderPricingModal(): void {
     pricingCardsContainer.appendChild(card);
   });
 
-  // Attach card button handlers
   pricingCardsContainer.querySelectorAll('button[data-action]').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       const action = (e.currentTarget as HTMLElement).getAttribute('data-action');
@@ -553,7 +619,7 @@ function setupEventListeners(): void {
     }
 
     hideInputError();
-    updateUrlQuery(parsed.owner, parsed.repo);
+    navigateTo(`/?repo=${encodeURIComponent(`${parsed.owner}/${parsed.repo}`)}`);
     inspectRepo(parsed.owner, parsed.repo);
   });
 
@@ -565,21 +631,19 @@ function setupEventListeners(): void {
         hideInputError();
         const parsed = parseGitHubRepo(repoAttr);
         if (parsed) {
-          updateUrlQuery(parsed.owner, parsed.repo);
+          navigateTo(`/?repo=${encodeURIComponent(`${parsed.owner}/${parsed.repo}`)}`);
           inspectRepo(parsed.owner, parsed.repo);
         }
       }
     });
   });
 
-  // Share button click handler
   shareLinkBtn?.addEventListener('click', () => {
     const url = window.location.href;
     if (navigator.clipboard) {
       navigator.clipboard.writeText(url).then(() => {
         showToast('Link copied to clipboard! 📋');
-      }).catch((err) => {
-        console.error('Failed to copy share link:', err);
+      }).catch(() => {
         showToast('Link copied to clipboard! 📋');
       });
     } else {
@@ -587,7 +651,6 @@ function setupEventListeners(): void {
     }
   });
 
-  // Shallow clone copy command handler
   copyShallowCmdBtn?.addEventListener('click', () => {
     const cmdText = shallowCloneCmd.textContent || '';
     if (navigator.clipboard && cmdText) {
@@ -599,7 +662,6 @@ function setupEventListeners(): void {
     }
   });
 
-  // PAT Modal
   togglePatBtn?.addEventListener('click', () => {
     patModal.classList.toggle('hidden');
   });
@@ -637,7 +699,6 @@ function setupEventListeners(): void {
     refreshRateLimitData();
   });
 
-  // Pricing Modal
   openPricingBtn.addEventListener('click', async () => {
     if (getActiveToken()) {
       await runVerificationChecks();
@@ -670,7 +731,6 @@ function setupEventListeners(): void {
     renderPricingModal();
   });
 
-  // Rate limit header dropdown toggle
   rateLimitTrigger.addEventListener('click', (e) => {
     e.stopPropagation();
     rateLimitDropdown.classList.toggle('hidden');
@@ -718,10 +778,6 @@ function setupEventListeners(): void {
     patModal.classList.remove('hidden');
     patInput.focus();
   });
-
-  window.addEventListener('popstate', () => {
-    handleUrlQueryParams();
-  });
 }
 
 function showInputError(msg: string): void {
@@ -732,24 +788,6 @@ function showInputError(msg: string): void {
 function hideInputError(): void {
   inputError.classList.add('hidden');
   inputError.textContent = '';
-}
-
-function updateUrlQuery(owner: string, repo: string): void {
-  const url = new URL(window.location.href);
-  url.searchParams.set('repo', `${owner}/${repo}`);
-  window.history.pushState({}, '', url.toString());
-}
-
-function handleUrlQueryParams(): void {
-  const urlParams = new URLSearchParams(window.location.search);
-  const repoParam = urlParams.get('repo');
-  if (repoParam) {
-    repoInput.value = repoParam;
-    const parsed = parseGitHubRepo(repoParam);
-    if (parsed) {
-      inspectRepo(parsed.owner, parsed.repo);
-    }
-  }
 }
 
 async function inspectRepo(owner: string, repo: string): Promise<void> {
@@ -821,13 +859,6 @@ function renderDashboard(repo: any, rawLanguages: Record<string, number>): void 
   heroSizeValue.textContent = formattedSize.formattedString;
   heroSizeRaw.textContent = `(${formatNumber(repo.size)} KB raw)`;
 
-  // 6-Tier Weight Badges:
-  // 1. Feather: Emerald/Slate
-  // 2. Light: Emerald
-  // 3. Medium: Yellow/Amber
-  // 4. Heavy: Orange
-  // 5. Titan: Rose/Red
-  // 6. Black Hole: Pulsing Violet/Fuchsia
   if (formattedSize.weightCategory === 'feather') {
     weightBadge.textContent = 'Feather 🪶 Weight';
     weightBadge.className =
@@ -859,7 +890,6 @@ function renderDashboard(repo: any, rawLanguages: Record<string, number>): void 
     gaugeBar.style.width = `${formattedSize.gaugePercentage}%`;
   }, 100);
 
-  // Smart "Shallow Clone" Bandwidth Saver Helper Banner (> 100 MB = 102400 KB)
   if (repo.size > 102400) {
     shallowCloneCmd.textContent = `git clone --depth 1 https://github.com/${repo.owner.login}/${repo.name}.git`;
     shallowCloneBanner.classList.remove('hidden');
