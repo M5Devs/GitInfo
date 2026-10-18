@@ -2,7 +2,21 @@ import './style.css';
 import { parseGitHubRepo } from './utils/parser';
 import { formatRepoSize, formatNumber, formatRelativeTime } from './utils/formatters';
 import { calculateLanguageBreakdown } from './utils/languages';
-import { fetchRepoDetails, GitHubApiError, getStoredPat, setStoredPat } from './api/github';
+import { fetchRepoDetails, fetchRateLimit, GitHubApiError } from './api/github';
+import {
+  getStoredPat,
+  setStoredPat,
+  getStoredOAuthToken,
+  getStoredUserProfile,
+  getStoredPlan,
+  setStoredPlan,
+  getAuthType,
+  signOut,
+  initiateGitHubOAuth,
+  handleOAuthCallback,
+} from './utils/auth';
+import { getPricingTiers } from './utils/pricing';
+import { calculateFuelGauge } from './utils/rateLimit';
 
 // DOM Element References
 const searchForm = document.getElementById('search-form') as HTMLFormElement;
@@ -19,7 +33,32 @@ const patInput = document.getElementById('pat-input') as HTMLInputElement;
 const clearPatBtn = document.getElementById('clear-pat-btn') as HTMLButtonElement;
 const patIndicator = document.getElementById('pat-indicator') as HTMLSpanElement;
 
-// Display States
+// Pricing Modal Elements
+const openPricingBtn = document.getElementById('open-pricing-btn') as HTMLButtonElement;
+const pricingModal = document.getElementById('pricing-modal') as HTMLElement;
+const closePricingModalBtn = document.getElementById('close-pricing-modal') as HTMLButtonElement;
+const billingToggleBtn = document.getElementById('billing-toggle-btn') as HTMLButtonElement;
+const billingToggleCircle = document.getElementById('billing-toggle-circle') as HTMLElement;
+const billingMonthlyLabel = document.getElementById('billing-monthly-label') as HTMLElement;
+const billingAnnuallyLabel = document.getElementById('billing-annually-label') as HTMLElement;
+const pricingCardsContainer = document.getElementById('pricing-cards-container') as HTMLElement;
+const pricingToast = document.getElementById('pricing-toast') as HTMLElement;
+
+// Header & Rate Limit Elements
+const rateLimitTrigger = document.getElementById('rate-limit-trigger') as HTMLButtonElement;
+const rateLimitDropdown = document.getElementById('rate-limit-dropdown') as HTMLElement;
+const userBadgeContainer = document.getElementById('user-badge-container') as HTMLElement;
+const dropdownPlanBadge = document.getElementById('dropdown-plan-badge') as HTMLElement;
+const rateLimitCounts = document.getElementById('rate-limit-counts') as HTMLElement;
+const rateLimitBar = document.getElementById('rate-limit-bar') as HTMLElement;
+const rateLimitWarning = document.getElementById('rate-limit-warning') as HTMLElement;
+const rateLimitReset = document.getElementById('rate-limit-reset') as HTMLElement;
+const refreshRateLimitBtn = document.getElementById('refresh-rate-limit-btn') as HTMLButtonElement;
+const dropdownChangeTokenBtn = document.getElementById('dropdown-change-token-btn') as HTMLButtonElement;
+const dropdownSigninGithubBtn = document.getElementById('dropdown-signin-github-btn') as HTMLButtonElement;
+const dropdownLogoutBtn = document.getElementById('dropdown-logout-btn') as HTMLButtonElement;
+
+// Dashboard & State Displays
 const loadingSkeleton = document.getElementById('loading-skeleton') as HTMLElement;
 const errorCard = document.getElementById('error-card') as HTMLElement;
 const errorTitle = document.getElementById('error-title') as HTMLElement;
@@ -27,7 +66,7 @@ const errorMessage = document.getElementById('error-message') as HTMLElement;
 const errorActionBtn = document.getElementById('error-action-btn') as HTMLButtonElement;
 const repoDashboard = document.getElementById('repo-dashboard') as HTMLElement;
 
-// Dashboard Elements
+// Repo Hero Card Elements
 const ownerAvatar = document.getElementById('owner-avatar') as HTMLImageElement;
 const ownerLink = document.getElementById('owner-link') as HTMLAnchorElement;
 const repoLink = document.getElementById('repo-link') as HTMLAnchorElement;
@@ -58,10 +97,27 @@ const languagesTotalCount = document.getElementById('languages-total-count') as 
 const languagesBar = document.getElementById('languages-bar') as HTMLElement;
 const languagesLegend = document.getElementById('languages-legend') as HTMLElement;
 
+let currentBillingCycle: 'monthly' | 'annually' = 'monthly';
+
 // Initial state setup
-function init(): void {
-  updatePatUI();
+async function init(): Promise<void> {
   setupEventListeners();
+
+  // Handle OAuth callback if returning with ?code=...
+  try {
+    const authResult = await handleOAuthCallback();
+    if (authResult) {
+      // Successfully authenticated via OAuth
+      updateUserHeaderUI();
+      refreshRateLimitData();
+    }
+  } catch (err) {
+    console.error('Failed to exchange OAuth code:', err);
+  }
+
+  updatePatUI();
+  updateUserHeaderUI();
+  refreshRateLimitData();
   handleUrlQueryParams();
 }
 
@@ -74,6 +130,202 @@ function updatePatUI(): void {
     patInput.value = '';
     patIndicator.className = 'w-1.5 h-1.5 rounded-full bg-slate-500';
   }
+}
+
+function updateUserHeaderUI(): void {
+  const profile = getStoredUserProfile();
+  const oauthToken = getStoredOAuthToken();
+  const patToken = getStoredPat();
+  const plan = getStoredPlan();
+
+  userBadgeContainer.innerHTML = '';
+
+  if (profile && oauthToken) {
+    // Signed in via GitHub OAuth
+    const avatar = document.createElement('img');
+    avatar.src = profile.avatar_url;
+    avatar.alt = profile.login;
+    avatar.className = 'w-5 h-5 rounded-full border border-indigo-500/50';
+
+    const username = document.createElement('span');
+    username.className = 'font-semibold text-xs text-white max-w-[100px] truncate';
+    username.textContent = profile.login;
+
+    const badge = document.createElement('span');
+    if (plan === 'patron') {
+      badge.className = 'px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-pink-500/20 text-pink-300 border border-pink-500/30';
+      badge.textContent = 'Patron 💖';
+    } else {
+      badge.className = 'px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30';
+      badge.textContent = 'Pro';
+    }
+
+    userBadgeContainer.appendChild(avatar);
+    userBadgeContainer.appendChild(username);
+    userBadgeContainer.appendChild(badge);
+
+    dropdownLogoutBtn.classList.remove('hidden');
+    dropdownLogoutBtn.classList.add('flex');
+    dropdownSigninGithubBtn.parentElement?.classList.add('hidden');
+  } else if (patToken) {
+    // Authenticated via PAT
+    const icon = document.createElement('span');
+    icon.textContent = '🔑';
+
+    const text = document.createElement('span');
+    text.className = 'font-medium text-xs text-indigo-300';
+    text.textContent = '5k req/hr (PAT)';
+
+    userBadgeContainer.appendChild(icon);
+    userBadgeContainer.appendChild(text);
+
+    dropdownLogoutBtn.classList.remove('hidden');
+    dropdownLogoutBtn.classList.add('flex');
+    dropdownSigninGithubBtn.parentElement?.classList.remove('hidden');
+  } else {
+    // Guest Mode
+    const icon = document.createElement('span');
+    icon.textContent = '⚡';
+
+    const text = document.createElement('span');
+    text.className = 'font-medium text-xs text-slate-300';
+    text.textContent = '60 req/hr (Guest)';
+
+    const upgradeLink = document.createElement('span');
+    upgradeLink.className = 'text-[10px] font-bold text-indigo-400 hover:underline ml-1';
+    upgradeLink.textContent = 'Upgrade';
+
+    userBadgeContainer.appendChild(icon);
+    userBadgeContainer.appendChild(text);
+    userBadgeContainer.appendChild(upgradeLink);
+
+    dropdownLogoutBtn.classList.add('hidden');
+    dropdownLogoutBtn.classList.remove('flex');
+    dropdownSigninGithubBtn.parentElement?.classList.remove('hidden');
+  }
+
+  // Update dropdown plan badge
+  if (plan === 'patron') {
+    dropdownPlanBadge.textContent = 'Patron 💖';
+    dropdownPlanBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-pink-500/20 text-pink-300 border border-pink-500/30';
+  } else if (oauthToken || patToken) {
+    dropdownPlanBadge.textContent = 'Pro Plan (5,000/hr)';
+    dropdownPlanBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30';
+  } else {
+    dropdownPlanBadge.textContent = 'Guest Tier (60/hr)';
+    dropdownPlanBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-800 text-slate-400 border border-slate-700';
+  }
+}
+
+async function refreshRateLimitData(): Promise<void> {
+  try {
+    const status = await fetchRateLimit();
+    const gauge = calculateFuelGauge(status);
+
+    rateLimitCounts.textContent = `${formatNumber(gauge.remaining)} / ${formatNumber(gauge.limit)}`;
+    rateLimitBar.className = `h-full rounded-full transition-all duration-500 ${gauge.barColorClass}`;
+    rateLimitBar.style.width = `${gauge.percentageRemaining}%`;
+
+    if (gauge.warningMsg) {
+      rateLimitWarning.textContent = gauge.warningMsg;
+      rateLimitWarning.classList.remove('hidden');
+    } else {
+      rateLimitWarning.classList.add('hidden');
+    }
+
+    rateLimitReset.textContent = gauge.resetFormatted;
+  } catch (err) {
+    console.error('Failed to fetch rate limit:', err);
+    rateLimitCounts.textContent = 'Error loading limit';
+  }
+}
+
+function renderPricingModal(): void {
+  const plan = getStoredPlan();
+  const isAuthenticated = getAuthType() !== 'guest';
+  const tiers = getPricingTiers(plan, isAuthenticated, currentBillingCycle);
+
+  pricingCardsContainer.innerHTML = '';
+
+  tiers.forEach((tier) => {
+    const card = document.createElement('div');
+    const isPopular = tier.popular;
+
+    card.className = `flex flex-col justify-between p-5 rounded-2xl border transition-all duration-200 ${
+      isPopular
+        ? 'bg-gradient-to-b from-indigo-950/80 to-slate-900 border-indigo-500/60 shadow-xl shadow-indigo-500/10 ring-1 ring-indigo-500/40 relative'
+        : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+    }`;
+
+    let badgeHtml = '';
+    if (tier.badge) {
+      badgeHtml = `<span class="absolute -top-3 right-4 px-2.5 py-0.5 text-[10px] font-extrabold rounded-full bg-gradient-to-r from-indigo-500 to-pink-500 text-white shadow-md">${tier.badge}</span>`;
+    }
+
+    const perksList = tier.perks
+      .map(
+        (perk) => `
+      <li class="flex items-start gap-2 text-xs text-slate-300">
+        <svg class="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+        <span>${perk}</span>
+      </li>
+    `
+      )
+      .join('');
+
+    let buttonClass = 'w-full py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center text-center ';
+    if (tier.ctaAction === 'current' || tier.ctaAction === 'active') {
+      buttonClass += 'bg-slate-800 text-slate-400 cursor-default border border-slate-700/60';
+    } else if (tier.ctaAction === 'github_login') {
+      buttonClass += 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/25';
+    } else if (tier.ctaAction === 'star') {
+      buttonClass += 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30';
+    } else if (tier.ctaAction === 'sponsor') {
+      buttonClass += 'bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 text-white shadow-lg shadow-pink-600/20';
+    }
+
+    card.innerHTML = `
+      ${badgeHtml}
+      <div class="space-y-3">
+        <div>
+          <h3 class="text-base font-bold text-white">${tier.name}</h3>
+          <div class="flex items-baseline gap-1 mt-1">
+            <span class="text-2xl font-extrabold text-white">${tier.price}</span>
+            <span class="text-xs text-slate-400">${tier.period}</span>
+          </div>
+          <p class="text-[11px] font-mono text-indigo-400 font-semibold mt-1">${tier.limitText}</p>
+        </div>
+        <ul class="space-y-2 pt-2 border-t border-slate-800">
+          ${perksList}
+        </ul>
+      </div>
+      <div class="pt-5">
+        <button type="button" class="${buttonClass}" data-action="${tier.ctaAction}">
+          ${tier.ctaText}
+        </button>
+      </div>
+    `;
+
+    pricingCardsContainer.appendChild(card);
+  });
+
+  // Attach card button handlers
+  pricingCardsContainer.querySelectorAll('button[data-action]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const action = (e.currentTarget as HTMLElement).getAttribute('data-action');
+      if (action === 'github_login') {
+        pricingModal.classList.add('hidden');
+        initiateGitHubOAuth();
+      } else if (action === 'star') {
+        window.open('https://github.com/M5Devs/GitInfo', '_blank', 'noopener,noreferrer');
+      } else if (action === 'sponsor') {
+        setStoredPlan('patron');
+        updateUserHeaderUI();
+        window.open('https://github.com/sponsors/M5Devs', '_blank', 'noopener,noreferrer');
+        renderPricingModal();
+      }
+    });
+  });
 }
 
 function setupEventListeners(): void {
@@ -115,19 +367,22 @@ function setupEventListeners(): void {
     });
   });
 
-  togglePatBtn.addEventListener('click', () => {
+  // PAT Modal
+  togglePatBtn?.addEventListener('click', () => {
     patModal.classList.toggle('hidden');
   });
 
-  closePatModalBtn.addEventListener('click', () => {
+  closePatModalBtn?.addEventListener('click', () => {
     patModal.classList.add('hidden');
   });
 
-  patForm.addEventListener('submit', (e) => {
+  patForm?.addEventListener('submit', (e) => {
     e.preventDefault();
     const newToken = patInput.value.trim();
     setStoredPat(newToken);
     updatePatUI();
+    updateUserHeaderUI();
+    refreshRateLimitData();
     patModal.classList.add('hidden');
 
     const query = repoInput.value.trim();
@@ -139,9 +394,80 @@ function setupEventListeners(): void {
     }
   });
 
-  clearPatBtn.addEventListener('click', () => {
+  clearPatBtn?.addEventListener('click', () => {
     setStoredPat('');
     updatePatUI();
+    updateUserHeaderUI();
+    refreshRateLimitData();
+  });
+
+  // Pricing Modal
+  openPricingBtn.addEventListener('click', () => {
+    renderPricingModal();
+    pricingModal.classList.remove('hidden');
+  });
+
+  closePricingModalBtn.addEventListener('click', () => {
+    pricingModal.classList.add('hidden');
+  });
+
+  billingToggleBtn.addEventListener('click', () => {
+    if (currentBillingCycle === 'monthly') {
+      currentBillingCycle = 'annually';
+      billingToggleBtn.classList.replace('bg-indigo-600', 'bg-emerald-600');
+      billingToggleCircle.style.transform = 'translateX(24px)';
+      billingMonthlyLabel.className = 'text-xs font-medium text-slate-400';
+      billingAnnuallyLabel.className = 'text-xs font-bold text-white';
+      pricingToast.classList.remove('hidden');
+    } else {
+      currentBillingCycle = 'monthly';
+      billingToggleBtn.classList.replace('bg-emerald-600', 'bg-indigo-600');
+      billingToggleCircle.style.transform = 'translateX(0px)';
+      billingMonthlyLabel.className = 'text-xs font-bold text-white';
+      billingAnnuallyLabel.className = 'text-xs font-medium text-slate-400';
+      pricingToast.classList.add('hidden');
+    }
+    renderPricingModal();
+  });
+
+  // Rate limit header dropdown toggle
+  rateLimitTrigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    rateLimitDropdown.classList.toggle('hidden');
+    rateLimitDropdown.classList.toggle('flex');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!rateLimitDropdown.contains(e.target as Node) && !rateLimitTrigger.contains(e.target as Node)) {
+      rateLimitDropdown.classList.add('hidden');
+      rateLimitDropdown.classList.remove('flex');
+    }
+  });
+
+  refreshRateLimitBtn.addEventListener('click', () => {
+    refreshRateLimitData();
+  });
+
+  dropdownChangeTokenBtn.addEventListener('click', () => {
+    rateLimitDropdown.classList.add('hidden');
+    rateLimitDropdown.classList.remove('flex');
+    patModal.classList.remove('hidden');
+    patInput.focus();
+  });
+
+  dropdownSigninGithubBtn.addEventListener('click', () => {
+    rateLimitDropdown.classList.add('hidden');
+    rateLimitDropdown.classList.remove('flex');
+    initiateGitHubOAuth();
+  });
+
+  dropdownLogoutBtn.addEventListener('click', () => {
+    signOut();
+    updatePatUI();
+    updateUserHeaderUI();
+    refreshRateLimitData();
+    rateLimitDropdown.classList.add('hidden');
+    rateLimitDropdown.classList.remove('flex');
   });
 
   errorActionBtn.addEventListener('click', () => {
@@ -188,6 +514,7 @@ async function inspectRepo(owner: string, repo: string): Promise<void> {
   try {
     const data = await fetchRepoDetails(owner, repo);
     renderDashboard(data.repo, data.languages);
+    refreshRateLimitData();
   } catch (err: any) {
     if (err instanceof GitHubApiError) {
       showError(err.message, err.isRateLimit);
