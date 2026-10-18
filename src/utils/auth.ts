@@ -7,12 +7,14 @@ export interface UserProfile {
   public_repos: number;
 }
 
-export type PlanTier = 'guest' | 'pro' | 'patron';
+export type PlanTier = 'guest' | 'pro' | 'gigachad' | 'patron';
 
 export const OAUTH_TOKEN_KEY = 'gitinfo_github_oauth_token';
 export const PAT_STORAGE_KEY = 'gitinfo_github_pat';
 export const USER_PROFILE_KEY = 'gitinfo_user_profile';
 export const USER_PLAN_KEY = 'gitinfo_user_plan';
+export const GIGACHAD_VERIFIED_KEY = 'gitinfo_gigachad_verified';
+export const PATRON_VERIFIED_KEY = 'gitinfo_patron_verified';
 
 // Default Client ID for GitHub OAuth app if not set in Vite env
 export const GITHUB_CLIENT_ID = import.meta.env.VITE_GITHUB_CLIENT_ID || 'Ov23liGitInfoDefault';
@@ -88,10 +90,42 @@ export function setStoredUserProfile(profile: UserProfile | null): void {
   }
 }
 
+export function getStoredGigachadVerified(): boolean {
+  try {
+    return localStorage.getItem(GIGACHAD_VERIFIED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function setStoredGigachadVerified(verified: boolean): void {
+  try {
+    localStorage.setItem(GIGACHAD_VERIFIED_KEY, String(verified));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function getStoredPatronVerified(): boolean {
+  try {
+    return localStorage.getItem(PATRON_VERIFIED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function setStoredPatronVerified(verified: boolean): void {
+  try {
+    localStorage.setItem(PATRON_VERIFIED_KEY, String(verified));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 export function getStoredPlan(): PlanTier {
   try {
     const plan = localStorage.getItem(USER_PLAN_KEY) as PlanTier;
-    if (plan && ['guest', 'pro', 'patron'].includes(plan)) {
+    if (plan && ['guest', 'pro', 'gigachad', 'patron'].includes(plan)) {
       return plan;
     }
   } catch {
@@ -113,6 +147,8 @@ export function signOut(): void {
   setStoredPat(null);
   setStoredUserProfile(null);
   setStoredPlan('guest');
+  setStoredGigachadVerified(false);
+  setStoredPatronVerified(false);
 }
 
 export async function fetchGitHubUserProfile(token: string): Promise<UserProfile> {
@@ -124,6 +160,9 @@ export async function fetchGitHubUserProfile(token: string): Promise<UserProfile
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      signOut();
+    }
     throw new Error(`Failed to fetch GitHub profile (${res.status})`);
   }
 
@@ -184,11 +223,13 @@ export async function handleOAuthCallback(): Promise<{ token: string; profile: U
     return null;
   }
 
-  // Clean code from URL without refreshing
+  // Clean code from URL immediately without refreshing or re-submitting code on page refresh
   const url = new URL(window.location.href);
   url.searchParams.delete('code');
   url.searchParams.delete('state');
-  window.history.replaceState({}, document.title, url.toString());
+  const cleanSearch = url.searchParams.toString();
+  const cleanPath = window.location.pathname + (cleanSearch ? `?${cleanSearch}` : '');
+  window.history.replaceState({}, document.title, cleanPath);
 
   try {
     const token = await exchangeOAuthCode(code);
@@ -197,7 +238,7 @@ export async function handleOAuthCallback(): Promise<{ token: string; profile: U
     const profile = await fetchGitHubUserProfile(token);
     setStoredUserProfile(profile);
 
-    // Default plan for signed in OAuth user is 'pro' unless already patron
+    // Default plan for signed in OAuth user is 'pro' unless already patron or gigachad
     if (getStoredPlan() === 'guest') {
       setStoredPlan('pro');
     }

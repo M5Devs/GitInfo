@@ -1,7 +1,12 @@
 import { PlanTier } from './auth';
 
+export interface VerificationStatus {
+  isGigachad: boolean;
+  isPatron: boolean;
+}
+
 export interface PricingTierInfo {
-  id: PlanTier | 'gigachad';
+  id: PlanTier;
   name: string;
   badge?: string;
   price: string;
@@ -9,12 +14,33 @@ export interface PricingTierInfo {
   limitText: string;
   perks: string[];
   ctaText: string;
-  ctaAction: 'current' | 'github_login' | 'star' | 'sponsor' | 'active';
+  ctaAction:
+    | 'current'
+    | 'github_login'
+    | 'star'
+    | 'sponsor'
+    | 'active'
+    | 'select_gigachad'
+    | 'select_patron'
+    | 'select_pro'
+    | 'recheck_star'
+    | 'recheck_sponsor';
   popular?: boolean;
+  isVerified?: boolean;
+  isLocked?: boolean;
+  lockPrompt?: string;
 }
 
-export function getPricingTiers(currentPlan: PlanTier, isAuthenticated: boolean, billingCycle: 'monthly' | 'annually'): PricingTierInfo[] {
+export function getPricingTiers(
+  currentPlan: PlanTier,
+  isAuthenticated: boolean,
+  billingCycle: 'monthly' | 'annually',
+  verification: VerificationStatus = { isGigachad: false, isPatron: false }
+): PricingTierInfo[] {
   const saveText = billingCycle === 'annually' ? ' (0% discount applied!)' : '';
+
+  const isGigachadVerified = verification.isGigachad;
+  const isPatronVerified = verification.isPatron;
 
   return [
     {
@@ -29,8 +55,8 @@ export function getPricingTiers(currentPlan: PlanTier, isAuthenticated: boolean,
         'High risk of rate limits 🚨',
         'Standard developer badge',
       ],
-      ctaText: !isAuthenticated ? 'Current Plan' : 'Free Guest Tier',
-      ctaAction: !isAuthenticated ? 'current' : 'current',
+      ctaText: !isAuthenticated && currentPlan === 'guest' ? 'Current Plan' : 'Free Guest Tier',
+      ctaAction: 'current',
     },
     {
       id: 'pro',
@@ -49,13 +75,14 @@ export function getPricingTiers(currentPlan: PlanTier, isAuthenticated: boolean,
       ctaText: isAuthenticated && currentPlan === 'pro'
         ? 'Active Plan ✅'
         : isAuthenticated
-        ? 'Included with Auth ✅'
+        ? 'Switch to Pro Tier'
         : 'Upgrade for $0 (Sign in with GitHub)',
-      ctaAction: isAuthenticated ? 'active' : 'github_login',
+      ctaAction: isAuthenticated ? (currentPlan === 'pro' ? 'active' : 'select_pro') : 'github_login',
     },
     {
       id: 'gigachad',
       name: 'Open Source Gigachad',
+      badge: isGigachadVerified ? 'Verified 🗿' : undefined,
       price: '$0',
       period: '/mo' + saveText,
       limitText: '5,000 requests / hour',
@@ -65,8 +92,19 @@ export function getPricingTiers(currentPlan: PlanTier, isAuthenticated: boolean,
         'Explicit permission to open PRs',
         'Linus Torvalds official blessing 🙏',
       ],
-      ctaText: 'Subscribe with a Star ⭐',
-      ctaAction: 'star',
+      isVerified: isGigachadVerified,
+      isLocked: !isGigachadVerified,
+      lockPrompt: !isGigachadVerified ? 'Star M5Devs/GitInfo on GitHub to unlock this badge!' : undefined,
+      ctaText: !isAuthenticated
+        ? 'Sign in with GitHub to verify star'
+        : isGigachadVerified
+        ? (currentPlan === 'gigachad' ? 'Gigachad Active 🗿' : 'Activate Gigachad Tier 🗿')
+        : 'Star M5Devs/GitInfo on GitHub to unlock this badge!',
+      ctaAction: !isAuthenticated
+        ? 'github_login'
+        : isGigachadVerified
+        ? (currentPlan === 'gigachad' ? 'active' : 'select_gigachad')
+        : 'star',
     },
     {
       id: 'patron',
@@ -81,8 +119,19 @@ export function getPricingTiers(currentPlan: PlanTier, isAuthenticated: boolean,
         'Keeps GitInfo 100% free for everyone',
         'Immunity to corporate acquisition 🛡️',
       ],
-      ctaText: currentPlan === 'patron' ? 'Patron Active 💖' : 'Sponsor on GitHub 💖',
-      ctaAction: 'sponsor',
+      isVerified: isPatronVerified,
+      isLocked: !isPatronVerified,
+      lockPrompt: !isPatronVerified ? 'Become an active sponsor to unlock the Patron badge!' : undefined,
+      ctaText: !isAuthenticated
+        ? 'Sign in to check Patron status'
+        : isPatronVerified
+        ? (currentPlan === 'patron' ? 'Patron Active 💖' : 'Activate Patron Tier 💖')
+        : 'Become an active sponsor to unlock the Patron badge!',
+      ctaAction: !isAuthenticated
+        ? 'github_login'
+        : isPatronVerified
+        ? (currentPlan === 'patron' ? 'active' : 'select_patron')
+        : 'sponsor',
     },
   ];
 }

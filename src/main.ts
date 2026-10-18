@@ -2,7 +2,14 @@ import './style.css';
 import { parseGitHubRepo } from './utils/parser';
 import { formatRepoSize, formatNumber, formatRelativeTime } from './utils/formatters';
 import { calculateLanguageBreakdown } from './utils/languages';
-import { fetchRepoDetails, fetchRateLimit, GitHubApiError } from './api/github';
+import {
+  fetchRepoDetails,
+  fetchRateLimit,
+  checkUserStarredRepo,
+  checkUserSponsoringAccount,
+  GitHubApiError,
+} from './api/github';
+import { isVipSponsor } from './utils/sponsors';
 import {
   getStoredPat,
   setStoredPat,
@@ -10,6 +17,11 @@ import {
   getStoredUserProfile,
   getStoredPlan,
   setStoredPlan,
+  getStoredGigachadVerified,
+  setStoredGigachadVerified,
+  getStoredPatronVerified,
+  setStoredPatronVerified,
+  getActiveToken,
   getAuthType,
   signOut,
   initiateGitHubOAuth,
@@ -49,6 +61,8 @@ const rateLimitTrigger = document.getElementById('rate-limit-trigger') as HTMLBu
 const rateLimitDropdown = document.getElementById('rate-limit-dropdown') as HTMLElement;
 const userBadgeContainer = document.getElementById('user-badge-container') as HTMLElement;
 const dropdownPlanBadge = document.getElementById('dropdown-plan-badge') as HTMLElement;
+const dropdownGigachadStatus = document.getElementById('dropdown-gigachad-status') as HTMLElement;
+const dropdownPatronStatus = document.getElementById('dropdown-patron-status') as HTMLElement;
 const rateLimitCounts = document.getElementById('rate-limit-counts') as HTMLElement;
 const rateLimitBar = document.getElementById('rate-limit-bar') as HTMLElement;
 const rateLimitWarning = document.getElementById('rate-limit-warning') as HTMLElement;
@@ -103,16 +117,25 @@ let currentBillingCycle: 'monthly' | 'annually' = 'monthly';
 async function init(): Promise<void> {
   setupEventListeners();
 
+  // Restore session state immediately from localStorage on boot
+  updatePatUI();
+  updateUserHeaderUI();
+
   // Handle OAuth callback if returning with ?code=...
   try {
     const authResult = await handleOAuthCallback();
     if (authResult) {
-      // Successfully authenticated via OAuth
+      // Successfully authenticated via OAuth -> automatically run verification checks
+      await runVerificationChecks();
       updateUserHeaderUI();
       refreshRateLimitData();
     }
   } catch (err) {
     console.error('Failed to exchange OAuth code:', err);
+  }
+
+  if (getActiveToken()) {
+    await runVerificationChecks();
   }
 
   updatePatUI();
@@ -121,14 +144,65 @@ async function init(): Promise<void> {
   handleUrlQueryParams();
 }
 
+async function runVerificationChecks(): Promise<{ isGigachad: boolean; isPatron: boolean }> {
+  const token = getActiveToken();
+  const profile = getStoredUserProfile();
+  const username = profile?.login;
+
+  if (!token) {
+    setStoredGigachadVerified(false);
+    setStoredPatronVerified(false);
+    if (getStoredPlan() === 'gigachad' || getStoredPlan() === 'patron') {
+      setStoredPlan('guest');
+    }
+    return { isGigachad: false, isPatron: false };
+  }
+
+  // Check Gigachad (Star verification for M5Devs/GitInfo)
+  let isGigachad = getStoredGigachadVerified();
+  const starResult = await checkUserStarredRepo('M5Devs', 'GitInfo', token);
+  if (starResult !== null) {
+    isGigachad = starResult;
+    setStoredGigachadVerified(isGigachad);
+  }
+
+  // Check Patron (VIP List OR GraphQL isSponsoring check for M5Devs)
+  let isPatron = isVipSponsor(username);
+  if (!isPatron) {
+    const sponsorResult = await checkUserSponsoringAccount('M5Devs', token);
+    if (sponsorResult !== null) {
+      isPatron = sponsorResult;
+      setStoredPatronVerified(isPatron);
+    } else {
+      isPatron = getStoredPatronVerified();
+    }
+  } else {
+    setStoredPatronVerified(true);
+  }
+
+  // Reset active plan if lost verification
+  const currentPlan = getStoredPlan();
+  if (currentPlan === 'gigachad' && !isGigachad) {
+    setStoredPlan('pro');
+  } else if (currentPlan === 'patron' && !isPatron) {
+    setStoredPlan('pro');
+  }
+
+  return { isGigachad, isPatron };
+}
+
 function updatePatUI(): void {
   const currentPat = getStoredPat();
   if (currentPat) {
     patInput.value = currentPat;
-    patIndicator.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400';
+    if (patIndicator) {
+      patIndicator.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400';
+    }
   } else {
     patInput.value = '';
-    patIndicator.className = 'w-1.5 h-1.5 rounded-full bg-slate-500';
+    if (patIndicator) {
+      patIndicator.className = 'w-1.5 h-1.5 rounded-full bg-slate-500';
+    }
   }
 }
 
@@ -137,6 +211,9 @@ function updateUserHeaderUI(): void {
   const oauthToken = getStoredOAuthToken();
   const patToken = getStoredPat();
   const plan = getStoredPlan();
+
+  const isGigachadVerified = getStoredGigachadVerified();
+  const isPatronVerified = getStoredPatronVerified();
 
   userBadgeContainer.innerHTML = '';
 
@@ -153,10 +230,16 @@ function updateUserHeaderUI(): void {
 
     const badge = document.createElement('span');
     if (plan === 'patron') {
-      badge.className = 'px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-pink-500/20 text-pink-300 border border-pink-500/30';
+      badge.className =
+        'px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-pink-500/20 text-pink-300 border border-pink-500/30 shadow-sm shadow-pink-500/30 animate-pulse';
       badge.textContent = 'Patron 💖';
+    } else if (plan === 'gigachad') {
+      badge.className =
+        'px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-sm shadow-amber-500/30 animate-pulse';
+      badge.textContent = 'Gigachad 🗿';
     } else {
-      badge.className = 'px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30';
+      badge.className =
+        'px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30';
       badge.textContent = 'Pro';
     }
 
@@ -176,8 +259,20 @@ function updateUserHeaderUI(): void {
     text.className = 'font-medium text-xs text-indigo-300';
     text.textContent = '5k req/hr (PAT)';
 
+    const badge = document.createElement('span');
+    if (plan === 'patron') {
+      badge.className = 'px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-pink-500/20 text-pink-300 border border-pink-500/30';
+      badge.textContent = 'Patron 💖';
+    } else if (plan === 'gigachad') {
+      badge.className = 'px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30';
+      badge.textContent = 'Gigachad 🗿';
+    }
+
     userBadgeContainer.appendChild(icon);
     userBadgeContainer.appendChild(text);
+    if (plan === 'patron' || plan === 'gigachad') {
+      userBadgeContainer.appendChild(badge);
+    }
 
     dropdownLogoutBtn.classList.remove('hidden');
     dropdownLogoutBtn.classList.add('flex');
@@ -208,12 +303,40 @@ function updateUserHeaderUI(): void {
   if (plan === 'patron') {
     dropdownPlanBadge.textContent = 'Patron 💖';
     dropdownPlanBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-pink-500/20 text-pink-300 border border-pink-500/30';
+  } else if (plan === 'gigachad') {
+    dropdownPlanBadge.textContent = 'Gigachad 🗿';
+    dropdownPlanBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30';
   } else if (oauthToken || patToken) {
     dropdownPlanBadge.textContent = 'Pro Plan (5,000/hr)';
     dropdownPlanBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30';
   } else {
     dropdownPlanBadge.textContent = 'Guest Tier (60/hr)';
     dropdownPlanBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-800 text-slate-400 border border-slate-700';
+  }
+
+  // Update dropdown verification statuses
+  if (dropdownGigachadStatus) {
+    if (isGigachadVerified) {
+      dropdownGigachadStatus.textContent = '✅ Verified';
+      dropdownGigachadStatus.className =
+        'text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-sm shadow-emerald-500/20';
+    } else {
+      dropdownGigachadStatus.textContent = '🔒 Locked';
+      dropdownGigachadStatus.className =
+        'text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700';
+    }
+  }
+
+  if (dropdownPatronStatus) {
+    if (isPatronVerified) {
+      dropdownPatronStatus.textContent = '✅ Verified';
+      dropdownPatronStatus.className =
+        'text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-pink-500/20 text-pink-300 border border-pink-500/30 shadow-sm shadow-pink-500/20';
+    } else {
+      dropdownPatronStatus.textContent = '🔒 Locked';
+      dropdownPatronStatus.className =
+        'text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700';
+    }
   }
 }
 
@@ -243,7 +366,12 @@ async function refreshRateLimitData(): Promise<void> {
 function renderPricingModal(): void {
   const plan = getStoredPlan();
   const isAuthenticated = getAuthType() !== 'guest';
-  const tiers = getPricingTiers(plan, isAuthenticated, currentBillingCycle);
+  const verification = {
+    isGigachad: getStoredGigachadVerified(),
+    isPatron: getStoredPatronVerified(),
+  };
+
+  const tiers = getPricingTiers(plan, isAuthenticated, currentBillingCycle, verification);
 
   pricingCardsContainer.innerHTML = '';
 
@@ -254,13 +382,22 @@ function renderPricingModal(): void {
     card.className = `flex flex-col justify-between p-5 rounded-2xl border transition-all duration-200 ${
       isPopular
         ? 'bg-gradient-to-b from-indigo-950/80 to-slate-900 border-indigo-500/60 shadow-xl shadow-indigo-500/10 ring-1 ring-indigo-500/40 relative'
-        : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+        : 'bg-slate-900/80 border-slate-800 hover:border-slate-700 relative'
     }`;
 
-    let badgeHtml = '';
-    if (tier.badge) {
-      badgeHtml = `<span class="absolute -top-3 right-4 px-2.5 py-0.5 text-[10px] font-extrabold rounded-full bg-gradient-to-r from-indigo-500 to-pink-500 text-white shadow-md">${tier.badge}</span>`;
+    let statusBadgeHtml = '';
+    if (tier.isVerified) {
+      statusBadgeHtml = `<span class="px-2 py-0.5 text-[10px] font-extrabold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm shadow-emerald-500/30 flex items-center gap-1">✅ Verified</span>`;
+    } else if (tier.isLocked && tier.id !== 'guest' && tier.id !== 'pro') {
+      statusBadgeHtml = `<span class="px-2 py-0.5 text-[10px] font-extrabold rounded-full bg-slate-800/80 text-slate-400 border border-slate-700/60 flex items-center gap-1">🔒 Locked</span>`;
     }
+
+    let topBadgeHtml = '';
+    if (tier.badge) {
+      topBadgeHtml = `<span class="px-2.5 py-0.5 text-[10px] font-extrabold rounded-full bg-gradient-to-r from-indigo-500 to-pink-500 text-white shadow-md">${tier.badge}</span>`;
+    }
+
+    const headerBadgesHtml = `<div class="absolute -top-3 right-4 flex items-center gap-1.5">${topBadgeHtml}${statusBadgeHtml}</div>`;
 
     const perksList = tier.perks
       .map(
@@ -273,19 +410,31 @@ function renderPricingModal(): void {
       )
       .join('');
 
-    let buttonClass = 'w-full py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center text-center ';
+    let buttonClass =
+      'w-full py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center text-center ';
     if (tier.ctaAction === 'current' || tier.ctaAction === 'active') {
       buttonClass += 'bg-slate-800 text-slate-400 cursor-default border border-slate-700/60';
     } else if (tier.ctaAction === 'github_login') {
       buttonClass += 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/25';
+    } else if (tier.ctaAction === 'select_pro' || tier.ctaAction === 'select_gigachad' || tier.ctaAction === 'select_patron') {
+      buttonClass += 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/25';
     } else if (tier.ctaAction === 'star') {
       buttonClass += 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30';
     } else if (tier.ctaAction === 'sponsor') {
       buttonClass += 'bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 text-white shadow-lg shadow-pink-600/20';
     }
 
+    let recheckBtnHtml = '';
+    if (isAuthenticated && tier.isLocked) {
+      if (tier.id === 'gigachad') {
+        recheckBtnHtml = `<button type="button" class="w-full mt-2 py-1.5 px-2 rounded-lg text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/20 transition-all flex items-center justify-center gap-1" data-action="recheck_star"><span>⭐ Re-check Star Status</span></button>`;
+      } else if (tier.id === 'patron') {
+        recheckBtnHtml = `<button type="button" class="w-full mt-2 py-1.5 px-2 rounded-lg text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-pink-300 border border-pink-500/20 transition-all flex items-center justify-center gap-1" data-action="recheck_sponsor"><span>💖 Re-check Sponsor Status</span></button>`;
+      }
+    }
+
     card.innerHTML = `
-      ${badgeHtml}
+      ${headerBadgesHtml}
       <div class="space-y-3">
         <div>
           <h3 class="text-base font-bold text-white">${tier.name}</h3>
@@ -299,10 +448,11 @@ function renderPricingModal(): void {
           ${perksList}
         </ul>
       </div>
-      <div class="pt-5">
+      <div class="pt-5 flex flex-col">
         <button type="button" class="${buttonClass}" data-action="${tier.ctaAction}">
           ${tier.ctaText}
         </button>
+        ${recheckBtnHtml}
       </div>
     `;
 
@@ -311,17 +461,43 @@ function renderPricingModal(): void {
 
   // Attach card button handlers
   pricingCardsContainer.querySelectorAll('button[data-action]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', async (e) => {
       const action = (e.currentTarget as HTMLElement).getAttribute('data-action');
       if (action === 'github_login') {
         pricingModal.classList.add('hidden');
         initiateGitHubOAuth();
       } else if (action === 'star') {
         window.open('https://github.com/M5Devs/GitInfo', '_blank', 'noopener,noreferrer');
+        if (isAuthenticated) {
+          await runVerificationChecks();
+          updateUserHeaderUI();
+          renderPricingModal();
+        }
       } else if (action === 'sponsor') {
+        window.open('https://github.com/sponsors/M5Devs', '_blank', 'noopener,noreferrer');
+        if (isAuthenticated) {
+          await runVerificationChecks();
+          updateUserHeaderUI();
+          renderPricingModal();
+        }
+      } else if (action === 'select_gigachad') {
+        setStoredPlan('gigachad');
+        updateUserHeaderUI();
+        renderPricingModal();
+      } else if (action === 'select_patron') {
         setStoredPlan('patron');
         updateUserHeaderUI();
-        window.open('https://github.com/sponsors/M5Devs', '_blank', 'noopener,noreferrer');
+        renderPricingModal();
+      } else if (action === 'select_pro') {
+        setStoredPlan('pro');
+        updateUserHeaderUI();
+        renderPricingModal();
+      } else if (action === 'recheck_star' || action === 'recheck_sponsor') {
+        const currentBtn = e.currentTarget as HTMLButtonElement;
+        currentBtn.innerText = 'Checking...';
+        currentBtn.disabled = true;
+        await runVerificationChecks();
+        updateUserHeaderUI();
         renderPricingModal();
       }
     });
@@ -376,10 +552,13 @@ function setupEventListeners(): void {
     patModal.classList.add('hidden');
   });
 
-  patForm?.addEventListener('submit', (e) => {
+  patForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const newToken = patInput.value.trim();
     setStoredPat(newToken);
+    if (newToken) {
+      await runVerificationChecks();
+    }
     updatePatUI();
     updateUserHeaderUI();
     refreshRateLimitData();
@@ -396,13 +575,18 @@ function setupEventListeners(): void {
 
   clearPatBtn?.addEventListener('click', () => {
     setStoredPat('');
+    runVerificationChecks();
     updatePatUI();
     updateUserHeaderUI();
     refreshRateLimitData();
   });
 
   // Pricing Modal
-  openPricingBtn.addEventListener('click', () => {
+  openPricingBtn.addEventListener('click', async () => {
+    if (getActiveToken()) {
+      await runVerificationChecks();
+      updateUserHeaderUI();
+    }
     renderPricingModal();
     pricingModal.classList.remove('hidden');
   });
@@ -444,7 +628,11 @@ function setupEventListeners(): void {
     }
   });
 
-  refreshRateLimitBtn.addEventListener('click', () => {
+  refreshRateLimitBtn.addEventListener('click', async () => {
+    if (getActiveToken()) {
+      await runVerificationChecks();
+      updateUserHeaderUI();
+    }
     refreshRateLimitData();
   });
 
@@ -579,13 +767,17 @@ function renderDashboard(repo: any, rawLanguages: Record<string, number>): void 
 
   weightBadge.textContent = `${formattedSize.weightCategory} Weight`;
   if (formattedSize.weightCategory === 'light') {
-    weightBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold capitalize bg-emerald-500/10 text-emerald-300 border border-emerald-500/20';
+    weightBadge.className =
+      'px-3 py-1 rounded-full text-xs font-semibold capitalize bg-emerald-500/10 text-emerald-300 border border-emerald-500/20';
   } else if (formattedSize.weightCategory === 'medium') {
-    weightBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold capitalize bg-sky-500/10 text-sky-300 border border-sky-500/20';
+    weightBadge.className =
+      'px-3 py-1 rounded-full text-xs font-semibold capitalize bg-sky-500/10 text-sky-300 border border-sky-500/20';
   } else if (formattedSize.weightCategory === 'heavy') {
-    weightBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold capitalize bg-amber-500/10 text-amber-300 border border-amber-500/20';
+    weightBadge.className =
+      'px-3 py-1 rounded-full text-xs font-semibold capitalize bg-amber-500/10 text-amber-300 border border-amber-500/20';
   } else {
-    weightBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold capitalize bg-rose-500/10 text-rose-300 border border-rose-500/20';
+    weightBadge.className =
+      'px-3 py-1 rounded-full text-xs font-semibold capitalize bg-rose-500/10 text-rose-300 border border-rose-500/20';
   }
 
   gaugeBar.style.width = '0%';

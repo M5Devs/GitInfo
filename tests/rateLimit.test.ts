@@ -68,14 +68,36 @@ describe('Pricing Tiers Logic', () => {
     expect(tiers[1].ctaText).toContain('Sign in with GitHub');
 
     expect(tiers[2].name).toBe('Open Source Gigachad');
-    expect(tiers[2].ctaText).toContain('Subscribe with a Star');
+    expect(tiers[2].isLocked).toBe(true);
 
     expect(tiers[3].name).toBe('Project Patron / Sponsor');
-    expect(tiers[3].ctaText).toContain('Sponsor on GitHub');
+    expect(tiers[3].isLocked).toBe(true);
   });
 
   it('shows active plan CTA for authenticated Pro users', () => {
     const tiers = getPricingTiers('pro', true, 'monthly');
     expect(tiers[1].ctaText).toBe('Active Plan ✅');
+  });
+
+  it('handles verified Gigachad and Patron tiers correctly', () => {
+    const verification = { isGigachad: true, isPatron: true };
+    const tiers = getPricingTiers('gigachad', true, 'monthly', verification);
+
+    expect(tiers[2].isVerified).toBe(true);
+    expect(tiers[2].ctaText).toContain('Gigachad Active');
+
+    expect(tiers[3].isVerified).toBe(true);
+    expect(tiers[3].ctaText).toContain('Activate Patron Tier');
+  });
+
+  it('locks Gigachad and Patron tiers when not verified', () => {
+    const verification = { isGigachad: false, isPatron: false };
+    const tiers = getPricingTiers('pro', true, 'monthly', verification);
+
+    expect(tiers[2].isLocked).toBe(true);
+    expect(tiers[2].ctaText).toContain('Star M5Devs/GitInfo on GitHub to unlock this badge!');
+
+    expect(tiers[3].isLocked).toBe(true);
+    expect(tiers[3].ctaText).toContain('Become an active sponsor to unlock the Patron badge!');
   });
 });
