@@ -156,3 +156,56 @@ export async function fetchRepoDetails(owner: string, repo: string, customPat?: 
     );
   }
 }
+
+export async function checkUserStarredRepo(owner: string, repo: string, customToken?: string): Promise<boolean> {
+  const token = customToken !== undefined ? customToken : getActiveToken();
+  if (!token) return false;
+
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github.v3+json',
+    Authorization: `Bearer ${token.trim()}`,
+  };
+
+  try {
+    const res = await fetch(`https://api.github.com/user/starred/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
+      headers,
+    });
+
+    return res.status === 204;
+  } catch {
+    return false;
+  }
+}
+
+export async function checkUserSponsoringAccount(account: string, customToken?: string): Promise<boolean> {
+  const token = customToken !== undefined ? customToken : getActiveToken();
+  if (!token) return false;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token.trim()}`,
+  };
+
+  const query = `query {
+    viewer {
+      isSponsoring(account: "${account}")
+    }
+  }`;
+
+  try {
+    const res = await fetch('https://api.github.com/graphql', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ query }),
+    });
+
+    if (!res.ok) {
+      return false;
+    }
+
+    const data = await res.json();
+    return Boolean(data?.data?.viewer?.isSponsoring);
+  } catch {
+    return false;
+  }
+}

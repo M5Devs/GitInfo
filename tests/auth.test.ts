@@ -10,6 +10,10 @@ import {
   getStoredUserProfile,
   setStoredPlan,
   getStoredPlan,
+  getStoredGigachadVerified,
+  setStoredGigachadVerified,
+  getStoredPatronVerified,
+  setStoredPatronVerified,
   signOut,
 } from '../src/utils/auth';
 
@@ -64,11 +68,25 @@ describe('Auth Utility Module', () => {
     setStoredPlan('pro');
     expect(getStoredPlan()).toBe('pro');
 
+    setStoredPlan('gigachad');
+    expect(getStoredPlan()).toBe('gigachad');
+
     setStoredPlan('patron');
     expect(getStoredPlan()).toBe('patron');
   });
 
-  it('clears all credentials on signOut', () => {
+  it('manages gigachad and patron verification storage', () => {
+    expect(getStoredGigachadVerified()).toBe(false);
+    expect(getStoredPatronVerified()).toBe(false);
+
+    setStoredGigachadVerified(true);
+    expect(getStoredGigachadVerified()).toBe(true);
+
+    setStoredPatronVerified(true);
+    expect(getStoredPatronVerified()).toBe(true);
+  });
+
+  it('clears all credentials and verifications on signOut', () => {
     setStoredOAuthToken('gho_test');
     setStoredPat('ghp_test');
     setStoredUserProfile({
@@ -80,6 +98,8 @@ describe('Auth Utility Module', () => {
       public_repos: 0,
     });
     setStoredPlan('patron');
+    setStoredGigachadVerified(true);
+    setStoredPatronVerified(true);
 
     signOut();
 
@@ -87,5 +107,7 @@ describe('Auth Utility Module', () => {
     expect(getStoredPat()).toBeNull();
     expect(getStoredUserProfile()).toBeNull();
     expect(getStoredPlan()).toBe('guest');
+    expect(getStoredGigachadVerified()).toBe(false);
+    expect(getStoredPatronVerified()).toBe(false);
   });
 });

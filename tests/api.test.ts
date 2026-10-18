@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchRepoDetails, GitHubApiError, setStoredPat, getStoredPat, PAT_STORAGE_KEY } from '../src/api/github';
+import {
+  fetchRepoDetails,
+  checkUserStarredRepo,
+  checkUserSponsoringAccount,
+  GitHubApiError,
+  setStoredPat,
+  getStoredPat,
+  PAT_STORAGE_KEY,
+} from '../src/api/github';
 
 describe('GitHub API Module', () => {
   beforeEach(() => {
@@ -90,5 +98,89 @@ describe('GitHub API Module', () => {
       expect(err.status).toBe(403);
       expect(err.isRateLimit).toBe(true);
     }
+  });
+
+  describe('checkUserStarredRepo', () => {
+    it('returns true when user has starred repo (HTTP 204)', async () => {
+      (fetch as any).mockResolvedValueOnce({
+        status: 204,
+      });
+
+      const isStarred = await checkUserStarredRepo('M5Devs', 'GitInfo', 'test_token');
+      expect(isStarred).toBe(true);
+      expect(fetch).toHaveBeenCalledWith(
+        'https://api.github.com/user/starred/M5Devs/GitInfo',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer test_token',
+          }),
+        })
+      );
+    });
+
+    it('returns false when user has not starred repo (HTTP 404)', async () => {
+      (fetch as any).mockResolvedValueOnce({
+        status: 404,
+      });
+
+      const isStarred = await checkUserStarredRepo('M5Devs', 'GitInfo', 'test_token');
+      expect(isStarred).toBe(false);
+    });
+
+    it('returns false when no token is provided', async () => {
+      const isStarred = await checkUserStarredRepo('M5Devs', 'GitInfo');
+      expect(isStarred).toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('checkUserSponsoringAccount', () => {
+    it('returns true when user is sponsoring account via GraphQL', async () => {
+      (fetch as any).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            viewer: {
+              isSponsoring: true,
+            },
+          },
+        }),
+      });
+
+      const isSponsoring = await checkUserSponsoringAccount('M5Devs', 'test_token');
+      expect(isSponsoring).toBe(true);
+      expect(fetch).toHaveBeenCalledWith(
+        'https://api.github.com/graphql',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            Authorization: 'Bearer test_token',
+          }),
+        })
+      );
+    });
+
+    it('returns false when user is not sponsoring account via GraphQL', async () => {
+      (fetch as any).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            viewer: {
+              isSponsoring: false,
+            },
+          },
+        }),
+      });
+
+      const isSponsoring = await checkUserSponsoringAccount('M5Devs', 'test_token');
+      expect(isSponsoring).toBe(false);
+    });
+
+    it('returns false when API call fails or errors occur', async () => {
+      (fetch as any).mockRejectedValueOnce(new Error('Network failure'));
+
+      const isSponsoring = await checkUserSponsoringAccount('M5Devs', 'test_token');
+      expect(isSponsoring).toBe(false);
+    });
   });
 });
