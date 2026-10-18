@@ -160,6 +160,9 @@ export async function fetchGitHubUserProfile(token: string): Promise<UserProfile
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      signOut();
+    }
     throw new Error(`Failed to fetch GitHub profile (${res.status})`);
   }
 
@@ -220,11 +223,13 @@ export async function handleOAuthCallback(): Promise<{ token: string; profile: U
     return null;
   }
 
-  // Clean code from URL without refreshing
+  // Clean code from URL immediately without refreshing or re-submitting code on page refresh
   const url = new URL(window.location.href);
   url.searchParams.delete('code');
   url.searchParams.delete('state');
-  window.history.replaceState({}, document.title, url.toString());
+  const cleanSearch = url.searchParams.toString();
+  const cleanPath = window.location.pathname + (cleanSearch ? `?${cleanSearch}` : '');
+  window.history.replaceState({}, document.title, cleanPath);
 
   try {
     const token = await exchangeOAuthCode(code);

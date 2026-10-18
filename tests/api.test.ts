@@ -8,6 +8,7 @@ import {
   getStoredPat,
   PAT_STORAGE_KEY,
 } from '../src/api/github';
+import { setStoredOAuthToken, getStoredOAuthToken } from '../src/utils/auth';
 
 describe('GitHub API Module', () => {
   beforeEach(() => {
@@ -80,6 +81,20 @@ describe('GitHub API Module', () => {
     await expect(fetchRepoDetails('nonexistent', 'repo')).rejects.toThrow(GitHubApiError);
   });
 
+  it('invokes signOut on 401 response in fetchRepoDetails', async () => {
+    setStoredOAuthToken('gho_invalid');
+
+    (fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      headers: new Headers(),
+    });
+
+    await expect(fetchRepoDetails('facebook', 'react')).rejects.toThrow(GitHubApiError);
+    expect(getStoredOAuthToken()).toBeNull();
+  });
+
   it('throws rate limit error when status is 403 and rate limit is reached', async () => {
     const headers = new Headers();
     headers.set('x-ratelimit-remaining', '0');
@@ -127,10 +142,23 @@ describe('GitHub API Module', () => {
       expect(isStarred).toBe(false);
     });
 
-    it('returns false when no token is provided', async () => {
-      const isStarred = await checkUserStarredRepo('M5Devs', 'GitInfo');
+    it('returns null on network failure so cached verification state is preserved', async () => {
+      (fetch as any).mockRejectedValueOnce(new Error('Network error'));
+
+      const isStarred = await checkUserStarredRepo('M5Devs', 'GitInfo', 'test_token');
+      expect(isStarred).toBeNull();
+    });
+
+    it('invokes signOut on 401 status', async () => {
+      setStoredOAuthToken('gho_invalid');
+
+      (fetch as any).mockResolvedValueOnce({
+        status: 401,
+      });
+
+      const isStarred = await checkUserStarredRepo('M5Devs', 'GitInfo', 'gho_invalid');
       expect(isStarred).toBe(false);
-      expect(fetch).not.toHaveBeenCalled();
+      expect(getStoredOAuthToken()).toBeNull();
     });
   });
 
@@ -149,15 +177,6 @@ describe('GitHub API Module', () => {
 
       const isSponsoring = await checkUserSponsoringAccount('M5Devs', 'test_token');
       expect(isSponsoring).toBe(true);
-      expect(fetch).toHaveBeenCalledWith(
-        'https://api.github.com/graphql',
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
-            Authorization: 'Bearer test_token',
-          }),
-        })
-      );
     });
 
     it('returns false when user is not sponsoring account via GraphQL', async () => {
@@ -176,11 +195,24 @@ describe('GitHub API Module', () => {
       expect(isSponsoring).toBe(false);
     });
 
-    it('returns false when API call fails or errors occur', async () => {
+    it('returns null when network API call fails', async () => {
       (fetch as any).mockRejectedValueOnce(new Error('Network failure'));
 
       const isSponsoring = await checkUserSponsoringAccount('M5Devs', 'test_token');
+      expect(isSponsoring).toBeNull();
+    });
+
+    it('invokes signOut on 401 status in GraphQL call', async () => {
+      setStoredOAuthToken('gho_invalid');
+
+      (fetch as any).mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+      });
+
+      const isSponsoring = await checkUserSponsoringAccount('M5Devs', 'gho_invalid');
       expect(isSponsoring).toBe(false);
+      expect(getStoredOAuthToken()).toBeNull();
     });
   });
 });

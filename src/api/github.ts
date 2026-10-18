@@ -1,4 +1,4 @@
-import { getActiveToken, getStoredPat, setStoredPat, PAT_STORAGE_KEY } from '../utils/auth';
+import { getActiveToken, getStoredPat, setStoredPat, PAT_STORAGE_KEY, signOut } from '../utils/auth';
 
 export { getStoredPat, setStoredPat, PAT_STORAGE_KEY };
 
@@ -74,6 +74,9 @@ export async function fetchRateLimit(customToken?: string): Promise<RateLimitSta
   const res = await fetch('https://api.github.com/rate_limit', { headers });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      signOut();
+    }
     throw new GitHubApiError(`Failed to fetch rate limit (${res.status})`, res.status);
   }
 
@@ -108,7 +111,10 @@ export async function fetchRepoDetails(owner: string, repo: string, customPat?: 
     ]);
 
     if (!repoRes.ok) {
-      if (repoRes.status === 404) {
+      if (repoRes.status === 401) {
+        signOut();
+        throw new GitHubApiError('Authentication token invalid or expired. Signed out.', 401);
+      } else if (repoRes.status === 404) {
         throw new GitHubApiError(
           `Repository "${owner}/${repo}" was not found or is private.`,
           404
@@ -157,7 +163,11 @@ export async function fetchRepoDetails(owner: string, repo: string, customPat?: 
   }
 }
 
-export async function checkUserStarredRepo(owner: string, repo: string, customToken?: string): Promise<boolean> {
+export async function checkUserStarredRepo(
+  owner: string,
+  repo: string,
+  customToken?: string
+): Promise<boolean | null> {
   const token = customToken !== undefined ? customToken : getActiveToken();
   if (!token) return false;
 
@@ -171,13 +181,31 @@ export async function checkUserStarredRepo(owner: string, repo: string, customTo
       headers,
     });
 
-    return res.status === 204;
+    if (res.status === 401) {
+      signOut();
+      return false;
+    }
+
+    if (res.status === 204) {
+      return true;
+    }
+
+    if (res.status === 404) {
+      return false;
+    }
+
+    // Other non-401/404 API error -> return null so caller preserves cached status
+    return null;
   } catch {
-    return false;
+    // Network error -> return null so caller preserves cached status
+    return null;
   }
 }
 
-export async function checkUserSponsoringAccount(account: string, customToken?: string): Promise<boolean> {
+export async function checkUserSponsoringAccount(
+  account: string,
+  customToken?: string
+): Promise<boolean | null> {
   const token = customToken !== undefined ? customToken : getActiveToken();
   if (!token) return false;
 
@@ -199,13 +227,18 @@ export async function checkUserSponsoringAccount(account: string, customToken?: 
       body: JSON.stringify({ query }),
     });
 
-    if (!res.ok) {
+    if (res.status === 401) {
+      signOut();
       return false;
+    }
+
+    if (!res.ok) {
+      return null;
     }
 
     const data = await res.json();
     return Boolean(data?.data?.viewer?.isSponsoring);
   } catch {
-    return false;
+    return null;
   }
 }

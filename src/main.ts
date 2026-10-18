@@ -117,6 +117,10 @@ let currentBillingCycle: 'monthly' | 'annually' = 'monthly';
 async function init(): Promise<void> {
   setupEventListeners();
 
+  // Restore session state immediately from localStorage on boot
+  updatePatUI();
+  updateUserHeaderUI();
+
   // Handle OAuth callback if returning with ?code=...
   try {
     const authResult = await handleOAuthCallback();
@@ -155,15 +159,26 @@ async function runVerificationChecks(): Promise<{ isGigachad: boolean; isPatron:
   }
 
   // Check Gigachad (Star verification for M5Devs/GitInfo)
-  const isGigachad = await checkUserStarredRepo('M5Devs', 'GitInfo', token);
-  setStoredGigachadVerified(isGigachad);
+  let isGigachad = getStoredGigachadVerified();
+  const starResult = await checkUserStarredRepo('M5Devs', 'GitInfo', token);
+  if (starResult !== null) {
+    isGigachad = starResult;
+    setStoredGigachadVerified(isGigachad);
+  }
 
   // Check Patron (VIP List OR GraphQL isSponsoring check for M5Devs)
   let isPatron = isVipSponsor(username);
   if (!isPatron) {
-    isPatron = await checkUserSponsoringAccount('M5Devs', token);
+    const sponsorResult = await checkUserSponsoringAccount('M5Devs', token);
+    if (sponsorResult !== null) {
+      isPatron = sponsorResult;
+      setStoredPatronVerified(isPatron);
+    } else {
+      isPatron = getStoredPatronVerified();
+    }
+  } else {
+    setStoredPatronVerified(true);
   }
-  setStoredPatronVerified(isPatron);
 
   // Reset active plan if lost verification
   const currentPlan = getStoredPlan();
