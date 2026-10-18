@@ -1,7 +1,7 @@
 {
-  "name": "gitinfo",
-  "private": true,
-  "version": "1.0.0",
+  "name": "@m5dev/gitinfo",
+  "version": "3.0.0",
+  "description": "Inspect any GitHub repository size, metrics, and health directly from CLI or Web.",
   "type": "module",
   "bin": {
     "gitinfo": "./cli/bin.js"
