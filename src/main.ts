@@ -35,6 +35,7 @@ const searchForm = document.getElementById('search-form') as HTMLFormElement;
 const repoInput = document.getElementById('repo-input') as HTMLInputElement;
 const inputError = document.getElementById('input-error') as HTMLDivElement;
 const presetBtns = document.querySelectorAll('.preset-btn');
+const toastContainer = document.getElementById('toast-container') as HTMLDivElement;
 
 // PAT Modal Elements
 const togglePatBtn = document.getElementById('toggle-pat-btn') as HTMLButtonElement;
@@ -85,6 +86,7 @@ const ownerAvatar = document.getElementById('owner-avatar') as HTMLImageElement;
 const ownerLink = document.getElementById('owner-link') as HTMLAnchorElement;
 const repoLink = document.getElementById('repo-link') as HTMLAnchorElement;
 const githubUrlBtn = document.getElementById('github-url-btn') as HTMLAnchorElement;
+const shareLinkBtn = document.getElementById('share-link-btn') as HTMLButtonElement;
 const repoDescription = document.getElementById('repo-description') as HTMLParagraphElement;
 const homepageContainer = document.getElementById('homepage-container') as HTMLElement;
 const homepageLink = document.getElementById('homepage-link') as HTMLAnchorElement;
@@ -94,6 +96,11 @@ const heroSizeValue = document.getElementById('hero-size-value') as HTMLElement;
 const heroSizeRaw = document.getElementById('hero-size-raw') as HTMLElement;
 const weightBadge = document.getElementById('weight-badge') as HTMLElement;
 const gaugeBar = document.getElementById('gauge-bar') as HTMLElement;
+
+// Shallow Clone Helper Banner
+const shallowCloneBanner = document.getElementById('shallow-clone-banner') as HTMLElement;
+const shallowCloneCmd = document.getElementById('shallow-clone-cmd') as HTMLElement;
+const copyShallowCmdBtn = document.getElementById('copy-shallow-cmd-btn') as HTMLButtonElement;
 
 // Key Stats
 const statStars = document.getElementById('stat-stars') as HTMLElement;
@@ -112,6 +119,28 @@ const languagesBar = document.getElementById('languages-bar') as HTMLElement;
 const languagesLegend = document.getElementById('languages-legend') as HTMLElement;
 
 let currentBillingCycle: 'monthly' | 'annually' = 'monthly';
+
+// Helper function to show elegant toast messages
+export function showToast(message: string): void {
+  if (!toastContainer) return;
+  const toast = document.createElement('div');
+  toast.className =
+    'bg-slate-900/90 text-white border border-indigo-500/40 rounded-xl px-4 py-2.5 text-xs font-semibold shadow-2xl backdrop-blur-md transition-all duration-300 transform translate-y-2 opacity-0 flex items-center gap-2 pointer-events-auto';
+  toast.innerHTML = `<span>${message}</span>`;
+  toastContainer.appendChild(toast);
+
+  // Trigger animation
+  requestAnimationFrame(() => {
+    toast.classList.remove('translate-y-2', 'opacity-0');
+  });
+
+  setTimeout(() => {
+    toast.classList.add('translate-y-2', 'opacity-0');
+    setTimeout(() => {
+      toast.remove();
+    }, 300);
+  }, 3000);
+}
 
 // Initial state setup
 async function init(): Promise<void> {
@@ -543,6 +572,33 @@ function setupEventListeners(): void {
     });
   });
 
+  // Share button click handler
+  shareLinkBtn?.addEventListener('click', () => {
+    const url = window.location.href;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(() => {
+        showToast('Link copied to clipboard! 📋');
+      }).catch((err) => {
+        console.error('Failed to copy share link:', err);
+        showToast('Link copied to clipboard! 📋');
+      });
+    } else {
+      showToast('Link copied to clipboard! 📋');
+    }
+  });
+
+  // Shallow clone copy command handler
+  copyShallowCmdBtn?.addEventListener('click', () => {
+    const cmdText = shallowCloneCmd.textContent || '';
+    if (navigator.clipboard && cmdText) {
+      navigator.clipboard.writeText(cmdText).then(() => {
+        showToast('Shallow clone command copied! 📋');
+      }).catch(() => {
+        showToast('Shallow clone command copied! 📋');
+      });
+    }
+  });
+
   // PAT Modal
   togglePatBtn?.addEventListener('click', () => {
     patModal.classList.toggle('hidden');
@@ -765,25 +821,53 @@ function renderDashboard(repo: any, rawLanguages: Record<string, number>): void 
   heroSizeValue.textContent = formattedSize.formattedString;
   heroSizeRaw.textContent = `(${formatNumber(repo.size)} KB raw)`;
 
-  weightBadge.textContent = `${formattedSize.weightCategory} Weight`;
-  if (formattedSize.weightCategory === 'light') {
+  // 6-Tier Weight Badges:
+  // 1. Feather: Emerald/Slate
+  // 2. Light: Emerald
+  // 3. Medium: Yellow/Amber
+  // 4. Heavy: Orange
+  // 5. Titan: Rose/Red
+  // 6. Black Hole: Pulsing Violet/Fuchsia
+  if (formattedSize.weightCategory === 'feather') {
+    weightBadge.textContent = 'Feather 🪶 Weight';
     weightBadge.className =
-      'px-3 py-1 rounded-full text-xs font-semibold capitalize bg-emerald-500/10 text-emerald-300 border border-emerald-500/20';
+      'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20';
+  } else if (formattedSize.weightCategory === 'light') {
+    weightBadge.textContent = 'Light 🟢 Weight';
+    weightBadge.className =
+      'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-200 border border-emerald-500/30';
   } else if (formattedSize.weightCategory === 'medium') {
+    weightBadge.textContent = 'Medium 🟡 Weight';
     weightBadge.className =
-      'px-3 py-1 rounded-full text-xs font-semibold capitalize bg-sky-500/10 text-sky-300 border border-sky-500/20';
+      'px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/20';
   } else if (formattedSize.weightCategory === 'heavy') {
+    weightBadge.textContent = 'Heavy 🟠 Weight';
     weightBadge.className =
-      'px-3 py-1 rounded-full text-xs font-semibold capitalize bg-amber-500/10 text-amber-300 border border-amber-500/20';
-  } else {
+      'px-3 py-1 rounded-full text-xs font-semibold bg-orange-500/15 text-orange-300 border border-orange-500/30';
+  } else if (formattedSize.weightCategory === 'titan') {
+    weightBadge.textContent = 'Titan 🔴 Weight';
     weightBadge.className =
-      'px-3 py-1 rounded-full text-xs font-semibold capitalize bg-rose-500/10 text-rose-300 border border-rose-500/20';
+      'px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30';
+  } else if (formattedSize.weightCategory === 'blackHole') {
+    weightBadge.textContent = 'Black Hole 🕳️💀 Weight';
+    weightBadge.className =
+      'px-3 py-1 rounded-full text-xs font-extrabold bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40 animate-pulse shadow-md shadow-fuchsia-500/20';
   }
 
   gaugeBar.style.width = '0%';
   setTimeout(() => {
     gaugeBar.style.width = `${formattedSize.gaugePercentage}%`;
   }, 100);
+
+  // Smart "Shallow Clone" Bandwidth Saver Helper Banner (> 100 MB = 102400 KB)
+  if (repo.size > 102400) {
+    shallowCloneCmd.textContent = `git clone --depth 1 https://github.com/${repo.owner.login}/${repo.name}.git`;
+    shallowCloneBanner.classList.remove('hidden');
+    shallowCloneBanner.classList.add('flex');
+  } else {
+    shallowCloneBanner.classList.add('hidden');
+    shallowCloneBanner.classList.remove('flex');
+  }
 
   statStars.textContent = formatNumber(repo.stargazers_count);
   statForks.textContent = formatNumber(repo.forks_count);

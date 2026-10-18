@@ -20,33 +20,57 @@ describe('GitHub Repo Parser', () => {
   });
 });
 
-describe('Formatters', () => {
+describe('Formatters & 6-Tier Weight Classification', () => {
   describe('formatRepoSize', () => {
-    it('formats sizes under 1024 KB as KB', () => {
+    it('classifies sizes < 1 MB as Feather 🪶', () => {
       const result = formatRepoSize(450);
       expect(result.value).toBe(450);
       expect(result.unit).toBe('KB');
       expect(result.formattedString).toBe('450 KB');
+      expect(result.weightCategory).toBe('feather');
+    });
+
+    it('classifies sizes 1 MB - 20 MB as Light 🟢', () => {
+      const result = formatRepoSize(15360); // 15 MB
+      expect(result.unit).toBe('MB');
+      expect(result.formattedString).toBe('15.00 MB');
       expect(result.weightCategory).toBe('light');
     });
 
-    it('formats sizes between 1024 KB and 1048576 KB as MB with 2 decimal places', () => {
-      const result = formatRepoSize(25088);
+    it('classifies sizes 20 MB - 100 MB as Medium 🟡', () => {
+      const result = formatRepoSize(51200); // 50 MB
       expect(result.unit).toBe('MB');
-      expect(result.formattedString).toBe('24.50 MB');
+      expect(result.formattedString).toBe('50.00 MB');
       expect(result.weightCategory).toBe('medium');
     });
 
-    it('formats sizes over 1048576 KB as GB with 2 decimal places', () => {
-      const result = formatRepoSize(1939865);
+    it('classifies sizes 100 MB - 1 GB as Heavy 🟠', () => {
+      const result = formatRepoSize(524288); // 512 MB
+      expect(result.unit).toBe('MB');
+      expect(result.formattedString).toBe('512.00 MB');
+      expect(result.weightCategory).toBe('heavy');
+    });
+
+    it('classifies sizes 1 GB - 10 GB as Titan 🔴', () => {
+      const result = formatRepoSize(3145728); // 3 GB
       expect(result.unit).toBe('GB');
-      expect(result.formattedString).toBe('1.85 GB');
-      expect(result.weightCategory).toBe('massive');
+      expect(result.formattedString).toBe('3.00 GB');
+      expect(result.weightCategory).toBe('titan');
+    });
+
+    it('classifies sizes > 10 GB as Black Hole 🕳️💀 (e.g., Chromium 64 GB)', () => {
+      const result = formatRepoSize(67108864); // 64 GB
+      expect(result.unit).toBe('GB');
+      expect(result.formattedString).toBe('64.00 GB');
+      expect(result.weightCategory).toBe('blackHole');
+      expect(result.gaugePercentage).toBe(100);
     });
 
     it('handles zero or negative sizes safely', () => {
       expect(formatRepoSize(0).formattedString).toBe('0 KB');
+      expect(formatRepoSize(0).weightCategory).toBe('feather');
       expect(formatRepoSize(-10).formattedString).toBe('0 KB');
+      expect(formatRepoSize(-10).weightCategory).toBe('feather');
     });
   });
 
